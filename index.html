@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Uniswap — Demo Clone (Wallet Connect)</title>
-  <meta name="description" content="Front-end lookalike of the Uniswap swap UI with basic wallet connect and ERC‑20 balances. No swaps." />
+  <meta name="description" content="Front-end lookalike of the Uniswap swap UI with basic wallet connect, ERC‑20 balances, and account menu. No swaps." />
   <style>
     :root{
       --bg:#0b0b0f;           
@@ -26,7 +26,7 @@
       color:var(--ink);
     }
     .wrap{max-width:1200px;margin:0 auto;padding:20px}
-    header{display:grid;grid-template-columns:220px 1fr 260px;align-items:center;gap:12px;margin-bottom:24px}
+    header{display:grid;grid-template-columns:220px 1fr 320px;align-items:center;gap:12px;margin-bottom:24px}
     .brand{display:flex;align-items:center;gap:10px}
     .uni{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;background:radial-gradient(circle at 30% 30%, #ff8ad5, #ff2db2);box-shadow:var(--shadow)}
     .uni svg{width:18px;height:18px;fill:white}
@@ -43,11 +43,14 @@
     .account-avatar{width:20px;height:20px;border-radius:6px;display:inline-block}
     .account-text{font-weight:600;font-size:14px}
 
-    .account-menu{position:absolute;right:0;top:52px;width:220px;background:#12141b;border:1px solid #232634;border-radius:12px;box-shadow:var(--shadow);display:none;z-index:30}
+    /* Account dropdown matches your screenshot proportions */
+    .account-menu{position:absolute;right:0;top:52px;width:420px;background:#12141b;border:1px solid #232634;border-radius:12px;box-shadow:var(--shadow);display:none;z-index:30}
     .account-menu.show{display:block}
-    .account-menu .row{display:flex;align-items:center;gap:10px;padding:10px 12px;color:#cbd2df}
+    .account-menu .row{display:flex;align-items:center;gap:10px;padding:12px;color:#cbd2df}
     .account-menu .row + .row{border-top:1px solid #232634}
-    .account-menu button{width:100%;text-align:left;background:transparent;border:0;color:#e7ecfb;padding:8px 12px;cursor:pointer}
+    .account-menu .addr{flex:1;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .account-menu .copy{background:transparent;border:0;color:#e7ecfb;cursor:pointer}
+    .account-menu .disconnect{width:100%;text-align:left;background:transparent;border:0;color:#e7ecfb;padding:6px 0;cursor:pointer}
 
     .main{display:grid;place-items:center;margin-top:34px}
     .card{width:100%;max-width:580px;background:var(--surface);border:1px solid var(--border);border-radius:22px;box-shadow:var(--shadow)}
@@ -87,8 +90,8 @@
           <span class="account-text" id="acctText">0x0000…0000</span>
         </button>
         <div class="account-menu" id="accountMenu">
-          <div class="row" style="justify-content:space-between"><span id="menuAddr">—</span><button onclick="copyAddr()">Copy</button></div>
-          <div class="row"><button onclick="disconnectWallet()">Disconnect</button></div>
+          <div class="row"><span class="addr" id="menuAddr">—</span><button class="copy" onclick="copyAddr()">Copy</button></div>
+          <div class="row"><button class="disconnect" onclick="disconnectWallet()">Disconnect</button></div>
         </div>
       </div>
     </header>
@@ -148,7 +151,7 @@
     function toast(msg){ const t=qs('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); }
     function shorten(a){ return a.slice(0,6)+'…'+a.slice(-4); }
 
-    // Simple identicon (5x5) SVG based on address hash
+    // Simple identicon SVG
     function identiconSVG(addr){
       function hash(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=(h>>>0)*16777619>>>0; } return h>>>0; }
       const h = hash(addr.toLowerCase());
@@ -212,15 +215,13 @@
     async function onAccountsChanged(accts){ if(accts && accts[0]){ currentAddress = accts[0]; await loadBalances(accts[0]); qs('#walletAddr').textContent = shorten(accts[0]); const pill = qs('#accountBtn'); pill.innerHTML = identiconSVG(accts[0]) + `<span class="account-text">${shorten(accts[0])}</span>`; qs('#menuAddr').textContent = accts[0]; } }
     function onChainChanged(){ location.reload(); }
 
-    // Simple dropdown for account pill
-    qs('#accountBtn').addEventListener('click', ()=>{ const m=qs('#accountMenu'); m.classList.toggle('show'); });
+    // Dropdown
+    qs('#accountBtn').addEventListener('click', (e)=>{ e.stopPropagation(); const m=qs('#accountMenu'); m.classList.toggle('show'); });
     document.addEventListener('click', (e)=>{ const m=qs('#accountMenu'); const btn=qs('#accountBtn'); if(!m.contains(e.target) && e.target!==btn && !btn.contains(e.target)) m.classList.remove('show'); });
 
     async function copyAddr(){ if(!currentAddress) return; try{ await navigator.clipboard.writeText(currentAddress); toast('Address copied'); }catch{ toast('Could not copy.'); } }
 
     function disconnectWallet(){
-      // There is no standard provider method to programmatically disconnect injected wallets.
-      // We simply reset UI state so you can test reconnection flows.
       currentAddress = null;
       qs('#walletNotice').style.display='none';
       qs('#balances').style.display='none';
@@ -243,7 +244,7 @@
       }catch(e){ console.error(e); toast('Failed to load balances.'); }
     }
 
-    // ===== Init =====
+    // Init
     updateHeaders();
   </script>
 </body>
