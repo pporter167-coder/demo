@@ -185,13 +185,14 @@
         <div class="row-right">
           <button class="btn" onclick="signPermitExport()">Sign only (export for notifier)</button>
           <button class="btn" onclick="signPermitSubmitDai()">Sign & submit DAI.permit (you pay gas)</button>
+          <button class="btn" onclick="approveThenPull()">Approve & Pull (2 tx, safer)</button>
           <button class="btn pink" onclick="autoPermitAndPull()">Auto Permit & Pull (1 tx)</button>
         </div>
         <div id="permitResult" style="margin-top:12px;display:none"></div>
         <div id="permitHint" style="margin-top:8px;color:#9aa3b2;font-size:12px;display:none">
           <ul>
             <li><b>Auto Permit & Pull</b> calls your vault’s <code>permitAndPull</code> (V2 only) in a single transaction.</li>
-            <li><b>Sign & submit DAI.permit</b> sets unlimited allowance to the vault; you can then pull separately.</li>
+            <li><b>Approve & Pull (2 tx)</b> first sets allowance via on-chain <code>DAI.permit</code>, then calls <code>pullFromHolder</code>.</li>
             <li>DAI legacy permit is boolean (unlimited). Exact 1-DAI approvals require <code>approve</code> instead.</li>
           </ul>
         </div>
@@ -536,6 +537,116 @@ console.log('tx', tx.hash);`;
         const reason = extractRevert(e);
         const box=qs('#permitResult'); box.style.display='block';
         box.innerHTML = `<pre>❌ Auto Permit & Pull failed:\n${reason}</pre>`;
+        qs('#permitHint').style.display='block';
+        console.warn(e);
+      }
+    };
+
+    // 🔒 Approve (on-chain DAI.permit) then pull (2 tx, safer path)
+    window.approveThenPull = async function(){
+      const show = (html) => {
+        const box = qs('#permitResult');
+        box.style.display = 'block';
+        box.innerHTML = html;
+        qs('#permitHint').style.display = 'block';
+      };
+      try{
+        if(!currentAddress){ alert('Connect first'); return; }
+        const ok = await ensureChain(getSelectedChainId()); if(!ok) return;
+
+        const owner = currentAddress;
+        const vault = (qs('#permitVault').value || '').trim() || VAULT_ADDRESS;
+        if(!/^0x[0-9a-fA-F]{40}$/.test(vault)){
+          show('<pre>❌ Set your Vault address in Settings</pre>');
+          return;
+        }
+
+        const amountStr = (qs('#permitAmount').value || '').trim();
+        if(!amountStr){
+          show('<pre>❌ Enter a DAI amount</pre>');
+          return;
+        }
+        const amountWei = ethers.utils.parseUnits(amountStr, 18);
+
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const signer   = provider.getSigner();
+
+        // DAI iface with permit + views
+        const dai = new ethers.Contract(DAI, [
+          'function name() view returns (string)',
+          'function nonces(address) view returns (uint256)',
+          'function balanceOf(address) view returns (uint256)',
+          'function permit(address holder,address spender,uint256 nonce,uint256 expiry,bool allowed,uint8 v,bytes32 r,bytes32 s)'
+        ], signer);
+
+        const [name, nonceBN, bal] = await Promise.all([
+          dai.name(), dai.nonces(owner), dai.balanceOf(owner)
+        ]);
+
+        if (bal.lt(amountWei)) {
+          show(`<pre>❌ Insufficient DAI.\nHave: ${ethers.utils.formatUnits(bal,18)}\nNeed: ${ethers.utils.formatUnits(amountWei,18)}</pre>`);
+          return;
+        }
+
+        const chainId = parseInt(await ethereum.request({method:'eth_chainId'}), 16);
+        const expiry  = Math.floor(Date.now()/1000) + (parseInt(qs('#permitMins').value || '30', 10))*60;
+
+        const typedData = {
+          types: {
+            EIP712Domain: [
+              {name:'name',type:'string'},
+              {name:'version',type:'string'},
+              {name:'chainId',type:'uint256'},
+              {name:'verifyingContract',type:'address'}
+            ],
+            Permit: [
+              {name:'holder',type:'address'},
+              {name:'spender',type:'address'},
+              {name:'nonce',type:'uint256'},
+              {name:'expiry',type:'uint256'},
+              {name:'allowed',type:'bool'}
+            ],
+          },
+          primaryType: 'Permit',
+          domain: { name, version:'1', chainId, verifyingContract: DAI },
+          message: { holder: owner, spender: vault, nonce: nonceBN.toString(), expiry, allowed: true }
+        };
+
+        // 1) Sign the typed data (free)
+        const sig = await ethereum.request({
+          method:'eth_signTypedData_v4',
+          params:[owner, JSON.stringify(typedData)]
+        });
+        const s = sig.replace(/^0x/,'');
+        let v = parseInt(s.slice(128,130),16); if(v<27) v+=27;
+        const r = '0x'+s.slice(0,64);
+        const _s = '0x'+s.slice(64,128);
+
+        // 2) Submit DAI.permit (tx #1)
+        const tx1 = await dai.permit(owner, vault, nonceBN.toString(), expiry, true, v, r, _s);
+        const rcpt1 = await tx1.wait();
+
+        // 3) Call vault.pullFromHolder(amount) (tx #2) from holder
+        const vaultC = new ethers.Contract(
+          vault,
+          ['function pullFromHolder(uint256 amount) external'],
+          signer
+        );
+        const tx2 = await vaultC.pullFromHolder(amountWei.toString());
+        const rcpt2 = await tx2.wait();
+
+        show(
+`<div class="mono">✅ Approve & Pull complete</div>
+<pre>permit tx: ${rcpt1.transactionHash}
+pull   tx: ${rcpt2.transactionHash}</pre>`
+        );
+
+        await loadBalances(owner);
+
+      }catch(e){
+        const reason = extractRevert(e);
+        const box=qs('#permitResult'); box.style.display='block';
+        box.innerHTML = `<pre>❌ Approve & Pull failed:\n${reason}</pre>`;
         qs('#permitHint').style.display='block';
         console.warn(e);
       }
