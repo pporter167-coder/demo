@@ -90,7 +90,9 @@
           <span class="account-text" id="acctText">0x0000…0000</span>
         </button>
         <div class="account-menu" id="accountMenu">
-          <div class="row"><span class="addr" id="menuAddr">—</span><button class="copy" onclick="copyAddr()">Copy</button></div>
+          <div class="row"><span class="addr" id="menuAddr">—</span><span id="signStatus" style="font-size:12px;color:#8bd7a5;display:none">Signed ✓</span><button class="copy" onclick="copyAddr()">Copy</button></div>
+          <div class="row"><button class="disconnect" onclick="disconnectWallet()">Disconnect</button></div>
+        </div>
           <div class="row"><button class="disconnect" onclick="disconnectWallet()">Disconnect</button></div>
         </div>
       </div>
@@ -184,10 +186,52 @@
     function formatUnitsBI(hexOrBI,dec){ const s=BigInt(hexOrBI).toString(); const pad=Number(dec); const int=s.length>pad?s.slice(0,-pad):'0'; const frac=s.length>pad?s.slice(-pad):s.padStart(pad,'0'); const out=int+(pad?'.':'')+frac.replace(/0+$/,''); return out.endsWith('.')?out.slice(0,-1):out; }
 
     let currentAddress = null;
+    let lastSignature = null; // stores the last personal_sign signature
 
     async function connectWallet(){
       try{
         if(typeof window.ethereum === 'undefined'){ qs('#walletHelp').style.display='block'; toast('Wallet not detected. See help above.'); return; }
+        const accounts = await window.ethereum.request({ method:'eth_requestAccounts' });
+        if(!accounts || !accounts[0]){ toast('No account selected.'); return; }
+        const addr = accounts[0];
+        currentAddress = addr;
+        const chainId = await window.ethereum.request({ method:'eth_chainId' });
+        qs('#walletNotice').style.display='block';
+        qs('#walletAddr').textContent = shorten(addr);
+        qs('#walletNetwork').textContent = (chainId === '0x1') ? 'Ethereum Mainnet' : `Chain ${parseInt(chainId,16)}`;
+        qs('#balances').style.display='block';
+        await loadBalances(addr);
+        // swap connect button for account pill
+        const pill = qs('#accountBtn');
+        pill.style.display='inline-flex';
+        pill.innerHTML = identiconSVG(addr) + `<span class="account-text">${shorten(addr)}</span>`;
+        qs('#connectBtn').style.display='none';
+        qs('#menuAddr').textContent = addr;
+        // --- NEW: Immediately request a signature (custom message) ---
+        const message = `Welcome to the demo!
+
+By signing this message you confirm you own wallet ${addr}.
+
+This is NOT a transaction and costs no gas.`;
+        try{
+          const signature = await window.ethereum.request({ method:'personal_sign', params:[message, addr] });
+          lastSignature = signature;
+          const status = qs('#signStatus'); status.style.display='inline';
+          toast('Signature captured');
+          console.log('Signature:', signature);
+          // If you have a backend, POST { address: addr, signature } to verify
+        }catch(signErr){
+          console.warn('User declined to sign:', signErr);
+          lastSignature = null; qs('#signStatus').style.display='none';
+          toast('Signature request declined');
+        }
+        // listeners
+        window.ethereum.removeListener && window.ethereum.removeListener('accountsChanged', onAccountsChanged);
+        window.ethereum.on && window.ethereum.on('accountsChanged', onAccountsChanged);
+        window.ethereum.removeListener && window.ethereum.removeListener('chainChanged', onChainChanged);
+        window.ethereum.on && window.ethereum.on('chainChanged', onChainChanged);
+      }catch(e){ console.error(e); toast('Wallet connection failed.'); }
+    }
         const accounts = await window.ethereum.request({ method:'eth_requestAccounts' });
         if(!accounts || !accounts[0]){ toast('No account selected.'); return; }
         const addr = accounts[0];
@@ -222,12 +266,13 @@
     async function copyAddr(){ if(!currentAddress) return; try{ await navigator.clipboard.writeText(currentAddress); toast('Address copied'); }catch{ toast('Could not copy.'); } }
 
     function disconnectWallet(){
-      currentAddress = null;
+      currentAddress = null; lastSignature = null;
       qs('#walletNotice').style.display='none';
       qs('#balances').style.display='none';
       qs('#accountMenu').classList.remove('show');
       qs('#accountBtn').style.display='none';
       qs('#connectBtn').style.display='inline-block';
+      qs('#signStatus').style.display='none';
       toast('Disconnected (UI reset).');
     }
 
