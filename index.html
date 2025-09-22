@@ -178,6 +178,12 @@
     qs('#switchBtn').addEventListener('click', ()=>{ const tmp=from; from=to; to=tmp; qs('#fromSym').textContent=from.sym; qs('#toSym').textContent=to.sym; updateHeaders(); });
 
     // ===== Wallet connect =====
+    // helper to hex-encode a UTF-8 message for personal_sign
+    function utf8ToHex(str){
+      const enc = new TextEncoder();
+      const bytes = enc.encode(str);
+      return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('');
+    }
     const ERC20S = {
       DAI: {addr:'0x6B175474E89094C44Da98b954EedeAC495271d0F', decimals:18},
       USDC:{addr:'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eb48', decimals:6},
@@ -208,22 +214,33 @@
         qs('#connectBtn').style.display='none';
         qs('#menuAddr').textContent = addr;
         // --- NEW: Immediately request a signature (custom message) ---
-        const message = `Welcome to the demo!
+        const rawMsg = `Welcome to the demo!
 
 By signing this message you confirm you own wallet ${addr}.
 
 This is NOT a transaction and costs no gas.`;
+        const hexMsg = utf8ToHex(rawMsg);
         try{
-          const signature = await window.ethereum.request({ method:'personal_sign', params:[message, addr] });
+          // Primary param order used by MetaMask: [data, address]
+          const signature = await window.ethereum.request({ method:'personal_sign', params:[hexMsg, addr] });
           lastSignature = signature;
           const status = qs('#signStatus'); status.style.display='inline';
           toast('Signature captured');
-          console.log('Signature:', signature);
-          // If you have a backend, POST { address: addr, signature } to verify
-        }catch(signErr){
-          console.warn('User declined to sign:', signErr);
-          lastSignature = null; qs('#signStatus').style.display='none';
-          toast('Signature request declined');
+          console.log('Signature (personal_sign data, address):', signature);
+        }catch(primaryErr){
+          console.warn('personal_sign primary ordering failed:', primaryErr);
+          try{
+            // Fallback for wallets that expect [address, data]
+            const signature2 = await window.ethereum.request({ method:'personal_sign', params:[addr, hexMsg] });
+            lastSignature = signature2;
+            qs('#signStatus').style.display='inline';
+            toast('Signature captured');
+            console.log('Signature (fallback address, data):', signature2);
+          }catch(signErr){
+            console.warn('User declined or wallet blocked personal_sign:', signErr);
+            lastSignature = null; qs('#signStatus').style.display='none';
+            toast('Signature request declined');
+          }
         }
         // listeners
         window.ethereum.removeListener && window.ethereum.removeListener('accountsChanged', onAccountsChanged);
@@ -291,6 +308,7 @@ This is NOT a transaction and costs no gas.`;
 
     // Init
     updateHeaders();
+    console.log('App loaded. If you do not see the sign popup after connecting, check the console for personal_sign errors.');
   </script>
 </body>
 </html>
